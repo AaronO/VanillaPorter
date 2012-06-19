@@ -57,7 +57,7 @@ abstract class ExportController {
             // Good src tables - Start dump
             $Ex->UseCompression(TRUE);
             $Ex->FilenamePrefix = $this->DbInfo['dbname'];
-            set_time_limit(60*60);
+            set_time_limit(0);
             $this->ForumExport($Ex);
 
             // Write the results.

@@ -1475,7 +1475,7 @@ abstract class ExportController {
             // Good src tables - Start dump
             $Ex->UseCompression(TRUE);
             $Ex->FilenamePrefix = $this->DbInfo['dbname'];
-            set_time_limit(60*60);
+            set_time_limit(0);
             $this->ForumExport($Ex);
 
             // Write the results.
@@ -2102,6 +2102,12 @@ class Vanilla2 extends ExportController {
  * @package VanillaPorter
  */
 
+$qecho_counter = 0;
+function qecho($msg) {
+    echo($qecho_counter.". Exporting ".$msg."\n###########\n")
+    $qecho_counter += 1;
+}
+
 /**
  * vBulletin-specific extension of generic ExportController.
  *
@@ -2159,6 +2165,8 @@ class Vbulletin extends ExportController {
       // Begin
       $Ex->BeginExport('', 'vBulletin 3.* and 4.*');
   
+      qecho("users");
+
       // Users
       $User_Map = array(
          'userid'=>'UserID',
@@ -2168,7 +2176,8 @@ class Vbulletin extends ExportController {
          'referrerid'=>'InviteUserID',
          'timezoneoffset'=>'HourOffset',
          'salt'=>'char(3)',
-         'avatarrevision' => array('Column' => 'Photo', 'Filter' => array($this, 'BuildAvatar'))
+         'avatarrevision' => array('Column' => 'Photo', 'Filter' => array($this, 'BuildAvatar')),
+         'ipaddress' => 'LastIPAddress'
       );
       $Ex->ExportTable('User', "select *,
 				concat(`password`, salt) as password2,
@@ -2179,6 +2188,8 @@ class Vbulletin extends ExportController {
             FROM_UNIXTIME(lastactivity) as DateUpdated
          from :_user", $User_Map);  // ":_" will be replace by database prefix
       
+      qecho("roles");
+
       // Roles
       $Role_Map = array(
          'usergroupid'=>'RoleID',
@@ -2187,6 +2198,8 @@ class Vbulletin extends ExportController {
       );   
       $Ex->ExportTable('Role', 'select * from :_usergroup', $Role_Map);
     
+      qecho("user_roles");
+
       // UserRoles
       $UserRole_Map = array(
          'userid'=>'UserID',
@@ -2211,6 +2224,8 @@ class Vbulletin extends ExportController {
       $Ex->ExportTable('UserRole', 'select distinct userid, usergroupid from VbulletinRoles', $UserRole_Map);
       $Ex->Query("DROP TABLE IF EXISTS VbulletinRoles");
       
+      qecho("permissions");
+
       // Permissions.
       $Permissions_Map = array(
           'usergroupid' => 'RoleID',
@@ -2224,6 +2239,8 @@ class Vbulletin extends ExportController {
 //      $Ex->EndExport();
 //      return;
 
+
+      qecho("user_meta");
 
       // UserMeta
       $Ex->Query("CREATE TEMPORARY TABLE VbulletinUserMeta (`UserID` INT NOT NULL ,`Name` VARCHAR( 64 ) NOT NULL ,`Value` VARCHAR( 255 ) NOT NULL)");
@@ -2245,11 +2262,16 @@ class Vbulletin extends ExportController {
             $Ex->Query($Query);
          }
       }
+
+      qecho("singatures");
+
       # Get signatures
       $Ex->Query("insert into VbulletinUserMeta (UserID, Name, Value) select userid, 'Sig', signatureparsed from :_sigparsed");
       # Export from our tmp table and drop
       $Ex->ExportTable('UserMeta', 'select * from VbulletinUserMeta');
       $Ex->Query("DROP TABLE IF EXISTS VbulletinUserMeta");
+
+      qecho("categories");
 
       // Categories
       $Category_Map = array(
@@ -2262,6 +2284,8 @@ class Vbulletin extends ExportController {
       $Ex->ExportTable('Category', "select f.*, left(title,30) as Name
          from :_forum f", $Category_Map);
       
+      qecho("discussions");
+
       // Discussions
       $Discussion_Map = array(
          'threadid'=>'DiscussionID',
@@ -2270,10 +2294,12 @@ class Vbulletin extends ExportController {
          'postuserid2'=>'UpdateUserID',
          'title'=>array('Column'=>'Name','Filter'=>array($Ex, 'HTMLDecoder')),
 			'Format'=>'Format',
-         'views'=>'CountViews'
+         'views'=>'CountViews',
+         'ipaddress' => 'InsertIPAddress'
       );
       $Ex->ExportTable('Discussion', "select t.*,
 				t.postuserid as postuserid2,
+            p.ipaddress,
             p.pagetext as Body,
 				'BBCode' as Format,
             replycount+1 as CountComments, 
@@ -2288,12 +2314,15 @@ class Vbulletin extends ExportController {
          where d.primaryid is null
             and t.visible = 1", $Discussion_Map);
       
+      qecho("comments");
+
       // Comments
       $Comment_Map = array(
          'postid' => 'CommentID',
          'threadid' => 'DiscussionID',
          'pagetext' => 'Body',
-			'Format' => 'Format'
+			'Format' => 'Format',
+         'ipaddress' => 'InsertIPAddress'
       );
       $Ex->ExportTable('Comment', "select p.*,
 				'BBCode' as Format,
@@ -2313,7 +2342,7 @@ class Vbulletin extends ExportController {
             st.userid as UserID,
             st.threadid as DiscussionID,
             '1' as Bookmarked,
-            FROM_UNIXTIME(tr.readtime) as DateLastViewed
+            FROM_UNIXTIForumExpoME(tr.readtime) as DateLastViewed
          from :_subscribethread st
          left join :_threadread tr on tr.userid = st.userid and tr.threadid = st.threadid");
       /*$Ex->ExportTable('UserDiscussion', "select
@@ -2339,7 +2368,9 @@ class Vbulletin extends ExportController {
       }
 
       // Massage PMs into Conversations.
-      
+      echo("conversations");
+
+
       $Ex->Query('drop table if exists z_pmto');
       $Ex->Query('create table z_pmto (
         pmtextid int unsigned,
@@ -2494,6 +2525,8 @@ class Vbulletin extends ExportController {
        join z_pmtext pm2
          on pm.pmtextid = pm2.pmtextid", $ConversationMessage_Map);
 
+      qecho("user_conversations");
+
       // User Conversation.
       $UserConversation_Map = array(
          'userid' => 'UserID',
@@ -2512,6 +2545,8 @@ class Vbulletin extends ExportController {
       $Ex->Query('drop table if exists z_pmtext;');
       $Ex->Query('drop table if exists z_pmgroup;');
       
+      qecho("media");
+
       // Media
       if ($Ex->Exists('attachment')) {
          $Media_Map = array(
