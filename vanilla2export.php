@@ -2534,7 +2534,10 @@ class Vbulletin extends ExportController {
 
       secho("create indexes z_idx_pmgroup ...");
 
-      $Ex->Query('create index z_idx_pmgroup on z_pmgroup (title, userids);');
+      $Ex->Query('create index z_idx_pmtext_title2 on z_pmtext (title2);');
+      $Ex->Query('create index z_idx_pmtext_userids on z_pmtext (userids);');
+      $Ex->Query('create index z_idx_pmgroup_title on z_pmgroup (title);');
+      $Ex->Query('create index z_idx_pmgroup_userids on z_pmgroup (userids);');
       $Ex->Query('create index z_idx_pmgroup2 on z_pmgroup (group_id);');
 
       secho("update z_pmtext pm");
