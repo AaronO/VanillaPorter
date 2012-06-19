@@ -28,9 +28,18 @@
  */
 
 $qecho_counter = 0;
+$secho_counter = 0;
 function qecho($msg) {
-    echo($qecho_counter.". Exporting ".$msg."\n###########\n")
+    global $secho_counter, $qecho_counter;
+    echo("".$qecho_counter.". Exporting ".$msg."\n###########\n");
     $qecho_counter += 1;
+    $secho_counter = 0;
+}
+
+function secho() {
+    global $secho_counter;
+    echo("\t".$secho_counter.". Subtask".$msg."\n");
+    $secho_counter += 1;
 }
 
 /**
@@ -293,15 +302,22 @@ class Vbulletin extends ExportController {
       }
 
       // Massage PMs into Conversations.
-      echo("conversations");
+      qecho("conversations");
 
+
+      secho("drop table z_pmto");
 
       $Ex->Query('drop table if exists z_pmto');
+
+      secho("create table z_pmto");
+
       $Ex->Query('create table z_pmto (
         pmtextid int unsigned,
         userid int unsigned,
         primary key(pmtextid, userid)
       )');
+
+      secho("insert ignore z_pmto");
 
       $Ex->Query('insert ignore z_pmto (
         pmtextid,
@@ -312,6 +328,8 @@ class Vbulletin extends ExportController {
         userid
       from :_pm;');
 
+      secho("insert ignore z_pmto");
+
       $Ex->Query('insert ignore z_pmto (
         pmtextid,
         userid
@@ -320,6 +338,8 @@ class Vbulletin extends ExportController {
         pmtextid,
         fromuserid
       from :_pmtext;');
+
+      secho("insert ignore z_pmto");
 
       $Ex->Query('insert ignore z_pmto (
         pmtextid,
@@ -332,6 +352,8 @@ class Vbulletin extends ExportController {
       join :_pmreceipt r
         on pm.pmid = r.pmid;');
 
+      secho("insert ignore z_pmto");
+
       $Ex->Query('insert ignore z_pmto (
         pmtextid,
         userid
@@ -343,12 +365,19 @@ class Vbulletin extends ExportController {
       join :_pmreceipt r
         on pm.pmid = r.pmid;');
 
+      secho("drop table z_pmto2");
+
       $Ex->Query('drop table if exists z_pmto2;');
+
+      secho("create table z_pmto2");
+
       $Ex->Query('create table z_pmto2 (
         pmtextid int unsigned,
         userids varchar(250),
         primary key (pmtextid)
       );');
+
+      secho("insert z_pmto2");
 
       $Ex->Query('insert z_pmto2 (
         pmtextid,
@@ -360,6 +389,8 @@ class Vbulletin extends ExportController {
       from z_pmto t
       group by t.pmtextid;');
 
+      secho("drop table z_pmtext");
+
       $Ex->Query('drop table if exists z_pmtext;');
       $Ex->Query('create table z_pmtext (
         pmtextid int unsigned,
@@ -368,6 +399,8 @@ class Vbulletin extends ExportController {
         userids varchar(250),
         group_id int unsigned
       );');
+
+      secho("insert z_pmtext");
 
       $Ex->Query("insert z_pmtext (
         pmtextid,
@@ -380,7 +413,11 @@ class Vbulletin extends ExportController {
         case when title like 'Re: %' then trim(substring(title, 4)) else title end as title2
       from :_pmtext pm;");
 
+      secho("create index z_idx_pmtext on z_pmtext");
+
       $Ex->Query('create index z_idx_pmtext on z_pmtext (pmtextid);');
+
+      secho("update z_pmtext");
 
       $Ex->Query('update z_pmtext pm
       join z_pmto2 t
@@ -389,12 +426,19 @@ class Vbulletin extends ExportController {
 
       // A conversation is a group of pmtexts with the same title and same users.
 
+      secho("drop table z_pmgroup");
+
       $Ex->Query('drop table if exists z_pmgroup;');
+
+      secho("create table z_pmgroup");
+
       $Ex->Query('create table z_pmgroup (
         group_id int unsigned,
         title varchar(250),
         userids varchar(250)
       );');
+
+      secho("insert z_pmgroup");
 
       $Ex->Query('insert z_pmgroup (
         group_id,
@@ -410,13 +454,19 @@ class Vbulletin extends ExportController {
         on pm.pmtextid = t2.pmtextid
       group by pm.title2, t2.userids;');
 
+      secho("create indexes z_idx_pmgroup ...");
+
       $Ex->Query('create index z_idx_pmgroup on z_pmgroup (title, userids);');
       $Ex->Query('create index z_idx_pmgroup2 on z_pmgroup (group_id);');
+
+      secho("update z_pmtext pm");
 
       $Ex->Query('update z_pmtext pm
       join z_pmgroup g
         on pm.title2 = g.title and pm.userids = g.userids
       set pm.group_id = g.group_id;');
+
+      secho("Mapping conversations");
 
       // Conversations.
       $Conversation_Map = array(
@@ -432,6 +482,8 @@ class Vbulletin extends ExportController {
        from :_pmtext pm
        join z_pmgroup g
          on g.group_id = pm.pmtextid', $Conversation_Map);
+
+      qecho("Conversation Messages");
 
       // Coversation Messages.
       $ConversationMessage_Map = array(
@@ -465,6 +517,7 @@ class Vbulletin extends ExportController {
        join z_pmgroup g
          on g.group_id = t.pmtextid;", $UserConversation_Map);
 
+      secho("Dropping tables");
       $Ex->Query('drop table if exists z_pmto');
       $Ex->Query('drop table if exists z_pmto2;');
       $Ex->Query('drop table if exists z_pmtext;');
