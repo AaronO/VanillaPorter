@@ -38,7 +38,7 @@ function qecho($msg) {
 
 function secho($msg) {
     global $secho_counter;
-    echo("\t".$secho_counter.". Subtask".$msg."\n");
+    echo("\t".$secho_counter.". Subtask ".$msg."\n");
     $secho_counter += 1;
 }
 
