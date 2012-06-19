@@ -36,7 +36,7 @@ function qecho($msg) {
     $secho_counter = 0;
 }
 
-function secho() {
+function secho($msg) {
     global $secho_counter;
     echo("\t".$secho_counter.". Subtask".$msg."\n");
     $secho_counter += 1;
@@ -391,7 +391,10 @@ class Vbulletin extends ExportController {
 
       secho("drop table z_pmtext");
 
-      $Ex->Query('drop table if exists z_pmtext;');
+      //$Ex->Query('drop table if exists z_pmtext;');
+
+      secho("creating table z_pmtext");
+
       $Ex->Query('create table z_pmtext (
         pmtextid int unsigned,
         title varchar(250),
