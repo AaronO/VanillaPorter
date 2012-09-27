@@ -2,24 +2,23 @@
 /**
  * vBulletin exporter tool.
  * 
- * This will migrate all vBulletin data for 3.x and 4.x forums. It even 
- * accounts for attachments created during 2.x and moved to 3.x.
+ * This will migrate all vBulletin data for 3.x and 4.x forums. 
+ * It migrates all attachments from 2.x and later.
  *
  * Supports the FileUpload, ProfileExtender, and Signature plugins.
  * All vBulletin data appropriate for those plugins will be prepared
  * and transferred.
  *
- * MIGRATING FILES:
- * 
- * 1) Avatars should be moved to the filesystem prior to export if they
- * are stored in the database. Copy all the avatar_* files from
- * vBulletin's /customavatars folder to Vanilla's /upload/userpics.
- * IMPORTANT: Make /userpics writable by the server BEFORE IMPORTING.
- * 
- * 2) Attachments should likewise be moved to the filesystem prior to
- * export. Copy all attachments from vBulletin's attachments folder to 
- * Vanilla's /upload folder without changing the internal folder structure.
- * IMPORTANT: Enable the FileUpload plugin BEFORE IMPORTING.
+ * To export only 1 category, add 'forumid=#' parameter to the URL.
+ * To extract avatars stored in database, add 'avatars=1' parameter to the URL.
+ * To extract attachments stored in db, add 'attachments=1' parameter to the URL.
+ * To stop the export after only extracting files, add 'noexport=1' param to the URL.
+ *
+ * TO MIGRATE FILES, BEFORE IMPORTING YOU MUST:
+ * 1) Copy entire 'customavatars' folder into Vanilla's /upload folder.
+ * 2) Copy entire 'attachments' folder into Vanilla's / upload folder.
+ * 3) Make BOTH folders writable by the server.
+ * 4) Enable the FileUpload plugin. (Media table must be present.)
  *
  * @copyright Vanilla Forums Inc. 2010
  * @author Matt Lincoln Russell lincoln@icrontic.com
@@ -47,47 +46,67 @@ function secho($msg) {
  *
  * @package VanillaPorter
  */
-class Vbulletin extends ExportController {
+class Vbulletin extends ExportController {   
+   /* @var string SQL fragment to build new path to attachments. */
+   public $AttachSelect = '';
+   
+   /* @var string SQL fragment to build new path to user photo. */
+   public $AvatarSelect = "case when a.userid is not null then concat('customavatars/', a.userid % 100,'/avatar_', a.userid, right(a.filename, instr(reverse(a.filename), '.'))) else null end as customphoto";
+   
+   /* @var array Default permissions to map. */
    static $Permissions = array(
    
-   'genericpermissions' => array(
-       1 => array('Garden.Profiles.View', 'Garden.Activity.View'),
-       2 => 'Garden.Profiles.Edit',
-       1024 => 'Plugins.Signatures.Edit'
-       ),
-   
-   'forumpermissions' => array(
-       1 => 'Vanilla.Discussions.View',
-       16 => 'Vanilla.Discussions.Add',
-       64 => 'Vanilla.Comments.Add',
-       4096 => 'Plugins.Attachments.Download',
-       8192 => 'Plugins.Attachments.Upload'),
-   
-   'adminpermissions' => array(
-       1 => array('Garden.Moderation.Manage', 'Vanilla.Discussions.Announce', 'Vanilla.Discussions.Close', 'Vanilla.Discussions.Delete', 'Vanilla.Comments.Delete', 'Vanilla.Comments.Edit', 'Vanilla.Discussions.Edit', 'Vanilla.Discussions.Sink', 'Garden.Activity.Delete', 'Garden.Users.Add', 'Garden.Users.Edit', 'Garden.Users.Approve', 'Garden.Users.Delete', 'Garden.Applicants.Manage'),
-       2 => array('Garden.Settings.View', 'Garden.Settings.Manage', 'Garden.Routes.Manage', 'Garden.Registration.Manage', 'Garden.Messages.Manage', 'Garden.Email.Manage', 'Vanilla.Categories.Manage', 'Vanilla.Settings.Manage', 'Vanilla.Spam.Manage', 'Garden.Plugins.Manage', 'Garden.Applications.Manage', 'Garden.Themes.Manage', 'Garden.Roles.Manage')
-//       4 => 'Garden.Settings.Manage',),
-       ),
-   
-   'wolpermissions' => array(
-       16 => 'Plugins.WhosOnline.ViewHidden')
+      'genericpermissions' => array(
+          1 => array('Garden.Profiles.View', 'Garden.Activity.View'),
+          2 => 'Garden.Profiles.Edit',
+          1024 => 'Plugins.Signatures.Edit'
+          ),
+      
+      'forumpermissions' => array(
+          1 => 'Vanilla.Discussions.View',
+          16 => 'Vanilla.Discussions.Add',
+          64 => 'Vanilla.Comments.Add',
+          4096 => 'Plugins.Attachments.Download',
+          8192 => 'Plugins.Attachments.Upload'
+          ),
+      
+      'adminpermissions' => array(
+          1 => array('Garden.Moderation.Manage', 'Vanilla.Discussions.Announce', 'Vanilla.Discussions.Close', 'Vanilla.Discussions.Delete', 'Vanilla.Comments.Delete', 'Vanilla.Comments.Edit', 'Vanilla.Discussions.Edit', 'Vanilla.Discussions.Sink', 'Garden.Activity.Delete', 'Garden.Users.Add', 'Garden.Users.Edit', 'Garden.Users.Approve', 'Garden.Users.Delete', 'Garden.Applicants.Manage'),
+          2 => array('Garden.Settings.View', 'Garden.Settings.Manage', 'Garden.Routes.Manage', 'Garden.Registration.Manage', 'Garden.Messages.Manage', 'Garden.Email.Manage', 'Vanilla.Categories.Manage', 'Vanilla.Settings.Manage', 'Vanilla.Spam.Manage', 'Garden.Plugins.Manage', 'Garden.Applications.Manage', 'Garden.Themes.Manage', 'Garden.Roles.Manage')
+//          4 => 'Garden.Settings.Manage',),
+          ),
+      
+//      'wolpermissions' => array(
+//          16 => 'Plugins.WhosOnline.ViewHidden')
    );
    
    static $Permissions2 = array();
    
-   /** @var array Required tables => columns */
+   /** @var array Required tables => columns. Commented values are optional. */
    protected $SourceTables = array(
+      //'attachment'
+      //'contenttype'
+      //'customavatar'
+      'deletionlog' => array('type','primaryid'),
+      //'filedata'
+      'forum' => array('forumid','description','displayorder','title','description','displayorder'),
+      'phrase' => array('varname','text','product','fieldname','varname'),
+      //'pm'
+      //'pmgroup'
+      //'pmreceipt'
+      //'pmtext'
+      'post' => array('postid','threadid','pagetext','userid','dateline','visible'),
+      //'setting'
+      'subscribethread' => array('userid','threadid'),
+      'thread' => array('threadid','forumid','postuserid','title','open','sticky','dateline','lastpost','visible'),
+      //'threadread'
       'user' => array('userid','username','password','email','referrerid','timezoneoffset','posts','salt',
          'birthday_search','joindate','lastvisit','lastactivity','membergroupids','usergroupid',
          'usertitle', 'homepage', 'aim', 'icq', 'yahoo', 'msn', 'skype', 'styleid', 'avatarid'),
-      'usergroup'=> array('usergroupid','title','description'),
+      //'userban'
       'userfield' => array('userid'),
-      'phrase' => array('varname','text','product','fieldname','varname'),
-      'thread' => array('threadid','forumid','postuserid','title','open','sticky','dateline','lastpost','visible'),
-      'deletionlog' => array('type','primaryid'),
-      'post' => array('postid','threadid','pagetext','userid','dateline','visible'),
-      'forum' => array('forumid','description','displayorder','title','description','displayorder'),
-      'subscribethread' => array('userid','threadid')
+      'usergroup'=> array('usergroupid','title','description'),
+      //'visitormessage'
    );
    
    /**
@@ -96,8 +115,37 @@ class Vbulletin extends ExportController {
     * @param ExportModel $Ex
     */
    protected function ForumExport($Ex) {
+      // Allow limited export of 1 category via ?forumid=ID
+      $ForumID = $this->Param('forumid');
+      if ($ForumID)
+         $ForumWhere = ' and t.forumid '.(strpos($ForumID, ', ') === FALSE ? "= $ForumID" : "in ($ForumID)");
+      else
+         $ForumWhere = '';
+      
+      // Determine the character set
+      $CharacterSet = $Ex->GetCharacterSet('post');
+      if ($CharacterSet)
+         $Ex->CharacterSet = $CharacterSet;
+      
+      // Optionally extract files from the database
+      $this->ExportBlobs(
+         $this->Param('attachments'),
+         $this->Param('avatars'),
+         $ForumWhere
+      );
+      
+      // End the process if that's all we wanted
+      if ($this->Param('noexport'))
+         return;
+      
       // Begin
       $Ex->BeginExport('', 'vBulletin 3.* and 4.*');
+      $Now = time();
+      
+      // Testing attachments
+//      $this->ExportMedia();
+//      $Ex->EndExport();
+//      return;
   
       qecho("users");
 
@@ -110,17 +158,31 @@ class Vbulletin extends ExportController {
          'referrerid'=>'InviteUserID',
          'timezoneoffset'=>'HourOffset',
          'salt'=>'char(3)',
-         'avatarrevision' => array('Column' => 'Photo', 'Filter' => array($this, 'BuildAvatar')),
          'ipaddress' => 'LastIPAddress'
       );
-      $Ex->ExportTable('User', "select *,
+      
+      // Use file avatar or the result of our blob export?
+      if ($this->GetConfig('usefileavatar'))
+         $User_Map['filephoto'] = 'Photo';
+      else
+         $User_Map['customphoto'] = 'Photo';
+      
+      $Ex->ExportTable('User', "select u.*,
 				concat(`password`, salt) as password2,
             DATE_FORMAT(birthday_search,GET_FORMAT(DATE,'ISO')) as DateOfBirth,
             FROM_UNIXTIME(joindate) as DateFirstVisit,
             FROM_UNIXTIME(lastvisit) as DateLastActive,
             FROM_UNIXTIME(joindate) as DateInserted,
-            FROM_UNIXTIME(lastactivity) as DateUpdated
-         from :_user", $User_Map);  // ":_" will be replace by database prefix
+            FROM_UNIXTIME(lastactivity) as DateUpdated,
+            case when avatarrevision > 0 then concat('userpics/avatar', u.userid, '_', 'avatarrevision', '.gif') else null end  as filephoto,
+            {$this->AvatarSelect},
+            case when ub.userid is not null then 1 else 0 end as Banned,
+            'vbulletin' as HashMethod
+         from :_user u
+         left join :_customavatar a
+         	on u.userid = a.userid
+         left join :_userban ub
+       	 	on u.userid = ub.userid and ub.liftdate <= now() ", $User_Map);  // ":_" will be replace by database prefix
       
       qecho("roles");
 
@@ -163,7 +225,7 @@ class Vbulletin extends ExportController {
       // Permissions.
       $Permissions_Map = array(
           'usergroupid' => 'RoleID',
-          'title' => array('Column' => 'Garden.SignIn.Allow', 'Filter' => array($this, SignInPermission)),
+          'title' => array('Column' => 'Garden.SignIn.Allow', 'Filter' => array($this, 'SignInPermission')),
           'genericpermissions' => array('Column' => 'GenericPermissions', 'type' => 'int'),
           'forumpermissions' => array('Column' => 'ForumPermissions', 'type' => 'int')
       );
@@ -200,7 +262,7 @@ class Vbulletin extends ExportController {
       qecho("singatures");
 
       # Get signatures
-      $Ex->Query("insert into VbulletinUserMeta (UserID, Name, Value) select userid, 'Sig', signatureparsed from :_sigparsed");
+      $Ex->Query("insert into VbulletinUserMeta (UserID, Name, Value) select userid, 'Plugin.Signatures.Sig', signatureparsed from :_sigparsed");
       # Export from our tmp table and drop
       $Ex->ExportTable('UserMeta', 'select * from VbulletinUserMeta');
       $Ex->Query("DROP TABLE IF EXISTS VbulletinUserMeta");
@@ -211,12 +273,13 @@ class Vbulletin extends ExportController {
       $Category_Map = array(
          'forumid'=>'CategoryID',
          'description'=>'Description',
-         'Name'=>array('Column'=>'Name','Filter'=>array($Ex, 'HTMLDecoder')),
+         'Name'=>array('Column'=>'Name'), //,'Filter'=>array($Ex, 'HTMLDecoder')),
          'displayorder'=>array('Column'=>'Sort', 'Type'=>'int'),
          'parentid'=>'ParentCategoryID'
       );
-      $Ex->ExportTable('Category', "select f.*, left(title,30) as Name
-         from :_forum f", $Category_Map);
+      $Ex->ExportTable('Category', "select f.*, title as Name
+         from :_forum f
+         where 1 = 1 $ForumWhere", $Category_Map);
       
       qecho("discussions");
 
@@ -231,6 +294,13 @@ class Vbulletin extends ExportController {
          'views'=>'CountViews',
          'ipaddress' => 'InsertIPAddress'
       );
+      
+      if ($Ex->Destination == 'database') {
+         // Remove the filter from the title so that this doesn't take too long.
+         $Ex->HTMLDecoderDb('thread', 'title', 'threadid');
+         unset($Discussion_Map['title']['Filter']);
+      }
+      
       $Ex->ExportTable('Discussion', "select t.*,
 				t.postuserid as postuserid2,
             p.ipaddress,
@@ -246,7 +316,8 @@ class Vbulletin extends ExportController {
             left join :_deletionlog d on (d.type='thread' and d.primaryid=t.threadid)
 				left join :_post p on p.postid = t.firstpostid
          where d.primaryid is null
-            and t.visible = 1", $Discussion_Map);
+            and t.visible = 1
+            $ForumWhere", $Discussion_Map);
       
       qecho("comments");
 
@@ -265,11 +336,14 @@ class Vbulletin extends ExportController {
          FROM_UNIXTIME(p.dateline) as DateInserted,
             FROM_UNIXTIME(p.dateline) as DateUpdated
          from :_post p
-				inner join :_thread t on p.threadid = t.threadid
-            left join :_deletionlog d on (d.type='post' and d.primaryid=p.postid)
+         inner join :_thread t 
+            on p.threadid = t.threadid
+         left join :_deletionlog d 
+            on (d.type='post' and d.primaryid=p.postid)
          where p.postid <> t.firstpostid 
             and d.primaryid is null
-            and p.visible = 1", $Comment_Map);
+            and p.visible = 1
+            $ForumWhere", $Comment_Map);
       
       // UserDiscussion
       $Ex->ExportTable('UserDiscussion', "select 
@@ -290,13 +364,17 @@ class Vbulletin extends ExportController {
       // Activity (from visitor messages in vBulletin 3.8+)
       if ($Ex->Exists('visitormessage')) {
          $Activity_Map = array(
-            'postuserid'=>'ActivityUserID',
-            'userid'=>'RegardingUserID',
+            'postuserid'=>'RegardingUserID',
+            'userid'=>'ActivityUserID',
             'pagetext'=>'Story',
-            'postuserid'=>'InsertUserID'
          );
          $Ex->ExportTable('Activity', "select *, 
-   			   FROM_UNIXTIME(dateline) as DateInserted
+               '{RegardingUserID,you} &rarr; {ActivityUserID,you}' as HeadlineFormat,
+               FROM_UNIXTIME(dateline) as DateInserted,
+               INET_NTOA(ipaddress) as InsertIPAddress,
+               postuserid as InsertUserID,
+               -1 as NotifiyUserID,
+               'WallPost' as ActivityType
    			from :_visitormessage
    			where state='visible'", $Activity_Map);
       }
@@ -533,26 +611,108 @@ class Vbulletin extends ExportController {
 
       // Media
       if ($Ex->Exists('attachment')) {
-         $Media_Map = array(
-            'attachmentid' => 'MediaID',
-            'filename' => 'Name',
-            'extension' => array('Column' => 'Type', 'Filter' => array($this, 'BuildMimeType')),
-            'filesize' => 'Size',
-            'filehash' => array('Column' => 'Path', 'Filter' => array($this, 'BuildMediaPath')),
-            'userid' => 'InsertUserID'
+         $this->ExportMedia();
+      }
+      
+      // End
+      $Ex->EndExport();
+      
+      
+   }
+   
+   /**
+    * Converts database blobs into files.
+    *
+    * Creates /attachments and /customavatars folders in the same directory as the export file.
+    *
+    * @param bool $Attachments Whether to move attachments.
+    * @param bool $CustomAvatars Whether to move avatars.
+    */
+   function ExportBlobs($Attachments = TRUE, $CustomAvatars = TRUE) {
+      $Ex = $this->Ex;
+      
+      if ($Attachments) {
+         $Identity = ($Ex->Exists('attachment', array('contenttypeid', 'contentid')) === TRUE) ? 'f.filedataid' : 'f.attachmentid';
+         $Sql = "select 
+            f.filedata, 
+            concat('attachments/', f.userid, '/', $Identity, '.attach') as Path
+            from :_attachment f"; // :_filedata
+         $Ex->ExportBlobs($Sql, 'filedata', 'Path');
+      }
+      
+      if ($CustomAvatars) {
+         $Sql = "select 
+               a.filedata, 
+               {$this->AvatarSelect}
+            from :_customavatar a
+            ";
+         $Sql = str_replace('u.userid', 'a.userid', $Sql);
+         $Ex->ExportBlobs($Sql, 'filedata', 'customphoto', 80);
+      }
+   }
+   
+   /**
+    * Export the attachments as Media.
+    *
+    * In vBulletin 4.x, the filedata table was introduced.
+    */
+   function ExportMedia() {
+      $Ex = $this->Ex;
+      
+      $Media_Map = array(
+         'attachmentid' => 'MediaID',
+         'filename' => 'Name',
+         'filesize' => 'Size',
+         'userid' => 'InsertUserID',
+         'extension' => array('Column' => 'Type', 'Filter' => array($this, 'BuildMimeType')),
+         'filehash' => array('Column' => 'Path', 'Filter' => array($this, 'BuildMediaPath'))
          );
-         // Test if hash field exists from 2.x
-         $SelectHash = '';
-         if ($Ex->Exists('attachment', array('hash')) === true)
-            $SelectHash = 'a.hash,';
          
-         // A) Do NOT grab every field to avoid potential 'filedata' blob.
-         // B) We must left join 'attachment' because we can't left join 'thread' on firstpostid (not an index).
-         // C) We lie about the height & width to spoof FileUpload serving generic thumbnail if they aren't set.
+      // Add hash fields if they exist (from 2.x)
+      $AttachColumns = array('hash', 'filehash');
+      $Missing = $Ex->Exists('attachment', $AttachColumns);
+      $AttachColumnsString = '';
+      foreach ($AttachColumns as $ColumnName) {
+         if (in_array($ColumnName, $Missing)) {
+            $AttachColumnsString .= ", null as $ColumnName";
+         } else {
+            $AttachColumnsString .= ", a.$ColumnName";
+         }
+      }
+      
+      // Do the export
+      if ($Ex->Exists('attachment', array('contenttypeid', 'contentid')) === TRUE) {
+         // Exporting 4.x with 'filedata' table.
+         $Media_Map['width'] = 'ImageWidth';
+         $Media_Map['height'] = 'ImageHeight';
          
-         // First comment attachments => 'Discussion' foreign key
+         // Build an index to join on.
+         $Ex->Query('create index ix_thread_firstpostid on :_thread (firstpostid)');
+         
+         $Ex->ExportTable('Media', "select 
+            case when t.threadid is not null then 'discussion' when ct.class = 'Post' then 'comment' when ct.class = 'Thread' then 'discussion' else ct.class end as ForeignTable,
+            case when t.threadid is not null then t.threadid else a.contenttypeid end as ForeignID,
+            FROM_UNIXTIME(a.dateline) as DateInserted,
+            'local' as StorageMethod,
+            a.*,
+            f.extension, f.filesize $AttachColumnsString,
+            f.width, f.height
+         from :_attachment a
+         join :_contenttype ct
+            on a.contenttypeid = ct.contenttypeid
+         join :_filedata f
+            on f.filedataid = a.filedataid
+         left join :_thread t
+            on t.firstpostid = a.contentid and a.contenttypeid = 1
+         where a.contentid > 0", $Media_Map);
+      } else {
+         // Exporting 3.x without 'filedata' table.
+         // Do NOT grab every field to avoid 'filedata' blob in 3.x.
+         // Left join 'attachment' because we can't left join 'thread' on firstpostid (not an index).
+         // Lie about the height & width to spoof FileUpload serving generic thumbnail if they aren't set.
+         $Extension = ExportModel::FileExtension('a.filename');
          $Ex->ExportTable('Media',
-            "select a.attachmentid, a.filename, a.extension, a.filesize, a.filehash, $SelectHash a.userid,
+            "select a.attachmentid, a.filename, $Extension as extension $AttachColumnsString, a.userid,
                'local' as StorageMethod, 
                'discussion' as ForeignTable,
                t.threadid as ForeignID,
@@ -562,10 +722,10 @@ class Vbulletin extends ExportController {
             from :_thread t
                left join :_attachment a ON a.postid = t.firstpostid
             where a.attachmentid > 0
-         
+   
             union all
-         
-            select a.attachmentid, a.filename, a.extension, a.filesize, a.filehash, $SelectHash a.userid,
+   
+            select a.attachmentid, a.filename, $Extension as extension $AttachColumnsString, a.userid,
                'local' as StorageMethod, 
                'comment' as ForeignTable,
                a.postid as ForeignID,
@@ -576,11 +736,8 @@ class Vbulletin extends ExportController {
                inner join :_thread t ON p.threadid = t.threadid
                left join :_attachment a ON a.postid = p.postid
             where p.postid <> t.firstpostid and  a.attachmentid > 0
-            ", $Media_Map);
+            ", $Media_Map);         
       }
-      
-      // End
-      $Ex->EndExport();
    }
    
    /**
@@ -592,11 +749,7 @@ class Vbulletin extends ExportController {
     *
     * In vBulletin 2.x, files were stored as an md5 hash in the root
     * attachment directory with a '.file' extension. Existing files were not 
-    * changed when upgrading to 3.x so older forums will need those too.
-    *
-    * This assumes the user is going to copy their entire attachments directory
-    * into Vanilla's /uploads folder and then use our custom plugin to convert
-    * file extensions.
+    * moved when upgrading to 3.x so older forums will need those too.
     *
     * @access public
     * @see ExportModel::_ExportTable
@@ -609,7 +762,7 @@ class Vbulletin extends ExportController {
    function BuildMediaPath($Value, $Field, $Row) {
       if (isset($Row['hash']) && $Row['hash'] != '') { 
          // Old school! (2.x)
-         return $Row['hash'].'.file';//.$Row['extension'];
+         $FilePath = $Row['hash'].'.file';//.$Row['extension'];
       }
       else { // Newer than 3.0
          // Build user directory path
@@ -618,8 +771,14 @@ class Vbulletin extends ExportController {
          for($i = 0; $i < $n; $i++) {
             $DirParts[] = $Row['userid']{$i};
          }
-         return implode('/', $DirParts).'/'.$Row['attachmentid'].'.attach';//.$Row['extension'];
+         
+         // 3.x uses attachmentid, 4.x uses filedataid
+         $Identity = (isset($Row['filedataid'])) ? $Row['filedataid'] : $Row['attachmentid'];
+         
+         $FilePath = implode('/', $DirParts).'/'.$Identity.'.attach';
       }
+      
+      return 'attachments/'.$FilePath;
    }
    
    /**
@@ -645,23 +804,13 @@ class Vbulletin extends ExportController {
    }
    
    /**
-    * Create Photo path from avatar data.
-    * 
-    * @access public
-    * @see ExportModel::_ExportTable
-    * 
-    * @param string $Value Ignored.
-    * @param string $Field Ignored.
-    * @param array $Row Contents of the current attachment record.
-    * @return string Path to avatar if one exists, or blank if none.
+    * Determine if this usergroup could likely sign in to forum based on its name.
+    *
+    * @param $Value
+    * @param $Field
+    * @param $Row
+    * @return bool
     */
-   function BuildAvatar($Value, $Field, $Row) {
-      if ($Row['avatarrevision'] > 0)
-         return 'userpics/avatar' . $Row['userid'] . '_' . $Row['avatarrevision'] . '.gif';
-      else
-         return '';
-   }
-   
    function SignInPermission($Value, $Field, $Row) {
       $Result = TRUE;
       if (stripos($Row['title'], 'unregistered') !== FALSE)
@@ -672,6 +821,27 @@ class Vbulletin extends ExportController {
       return $Result;
    }
    
+   /**
+    * Retrieve a value from the vBulletin setting table.
+    *
+    * @param string $Name Variable for which we want the value.
+    * @return mixed Value or FALSE if not found.
+    */
+   function GetConfig($Name) {
+      $Sql = "select * from :_setting where varname = '$Name'";
+      $Result = $this->Ex->Query($Sql, TRUE);
+      if ($Row = mysql_fetch_assoc($Result)) {
+         return $Row['value'];
+      }
+      return FALSE;
+   }
+   
+   /**
+    * @param $Value
+    * @param $Field
+    * @param $Row
+    * @return bool
+    */
    function FilterPermissions($Value, $Field, $Row) {
       if (!isset(self::$Permissions2[$Field]))
          return 0;
@@ -683,6 +853,10 @@ class Vbulletin extends ExportController {
       return $Value;
    }
    
+   /**
+    * @param $ColumnGroups
+    * @param $Map
+    */
    function AddPermissionColumns($ColumnGroups, &$Map) {
       $Permissions2 = array();
       
@@ -690,7 +864,7 @@ class Vbulletin extends ExportController {
          foreach ($Columns as $Mask => $ColumnArray) {
             $ColumnArray = (array)$ColumnArray;
             foreach ($ColumnArray as $Column) {
-               $Map[$Column] = array('Column' => $Column, 'Type' => 'tinyint(1)', 'Filter' => array($this, FilterPermissions));
+               $Map[$Column] = array('Column' => $Column, 'Type' => 'tinyint(1)', 'Filter' => array($this, 'FilterPermissions'));
                
                $Permissions2[$Column] = array($ColumnGroup, $Mask);
             }
